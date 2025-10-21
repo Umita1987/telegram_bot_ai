@@ -4,14 +4,14 @@ load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "your_default_telegram_token")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:test@db1/telegram_bot")
+DATABASE_URL = os.getenv("DATABASE_URL")
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "your_default_yookassa_secret_key")
-TEST_CHANNEL_ID = int(os.getenv("TEST_CHANNEL_ID",-1002467690619))
+TEST_CHANNEL_ID = int(os.getenv("TEST_CHANNEL_ID"))
 PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN")
 PAYMENT_RETURN_URL = os.getenv("PAYMENT_RETURN_URL")
-YOOKASSA_URL = "https://api.yookassa.ru/v3/payments"
-CHANNEL_USERNAME = "@WILDBERRIESSTUFF1"  # Укажи username своего канала
+YOOKASSA_URL = os.getenv("YOOKASSA_URL")
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 PHONE_NUMBER= os.getenv('PHONE_NUMBER')
@@ -20,9 +20,8 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_DB = os.getenv("POSTGRES_DB")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", )
-BITLY_ACCESS_TOKEN = "d29e4e3404068c146f71a0850f855ea5d17e595e"
+BITLY_ACCESS_TOKEN = os.getenv("BITLY_ACCESS_TOKEN")
 CUTTLY_API_KEY = os.getenv("CUTTLY_API_KEY")
 SENTRY_DSN = os.getenv("SENTRY_DSN")
 
-# Ozon parsing configuration
-ZENROWS_API_KEY = os.getenv("ZENROWS_API_KEY", "4cc57d5e64327c8c2f5825f895feed93660c6ad1")
+ZENROWS_API_KEY = os.getenv("ZENROWS_API_KEY")
