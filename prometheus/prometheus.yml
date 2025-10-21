@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Правила алертинга
+rule_files:
+  - '/etc/prometheus/alerts.yml'
+
+# Конфигурация Alertmanager (опционально)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093
+
+scrape_configs:
+  # Метрики телеграм бота
+  - job_name: 'telegram_bot'
+    static_configs:
+      - targets: ['telegram_bot:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+
+  # Метрики самого Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Метрики Grafana
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+
+  # Метрики Docker контейнеров (через cAdvisor)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']

@@ -1,0 +1,37 @@
+# Python
+pycache/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtualenv
+venv/
+env/
+ENV/
+
+# VSCode / PyCharm
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+
+# Migrations (если нужно)
+*/migrations/pycache/
+
+.venv/
+
+
+.env
+
+__pycache__/
+*.pyc
+

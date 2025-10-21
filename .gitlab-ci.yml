@@ -1,0 +1,132 @@
+stages:
+  - test
+  - deploy
+  
+  # --- TESTS ---
+tests:
+  stage: test
+  image: python:3.13
+  before_script:
+    - pip install --upgrade pip
+    - pip install tox
+  script:
+    - tox -e py313 -- -vv
+  artifacts:
+    when: always
+    paths:
+      - coverage.xml
+    reports:
+      junit: junit.xml
+    expire_in: 7 days
+    
+# --- SSH CHECK ---
+ssh-test:
+  stage: test
+  image: alpine:3.20
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  before_script:
+    - apk add --no-cache openssh
+    - if [ -z "$DEPLOY_HOST" ]; then echo "DEPLOY_HOST is empty"; exit 1; fi
+    - if [ -z "$DEPLOY_USER" ]; then echo "DEPLOY_USER is empty"; exit 1; fi
+    - printf "%s\n" "$DEPLOY_SSH_PRIVATE_KEY" | tr -d "\r" > /tmp/ci_key
+    - chmod 600 /tmp/ci_key
+    - echo "Key size bytes:" $(wc -c < /tmp/ci_key)
+    - echo "First line" ; head -n 1 /tmp/ci_key
+    - echo "Last  line" ; tail -n 1 /tmp/ci_key
+    - ssh-keygen -y -f /tmp/ci_key > /tmp/ci_key.pub || { echo "ssh-keygen cannot read key (bad or passphrase)"; exit 1; }
+    - echo "CI key fingerprint:" ; ssh-keygen -lf /tmp/ci_key.pub
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+  script:
+  - echo "MD5 fingerprint (for Hetzner):"
+  - ssh-keygen -lf /tmp/ci_key.pub -E md5
+  - echo "=== PUBLIC KEY TO ADD TO SERVER ==="
+  - cat /tmp/ci_key.pub
+  - echo "=== END PUBLIC KEY ==="
+  - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" /bin/echo SSH_OK
+
+# --- DEPLOY ---
+deploy:
+  stage: deploy
+  image: alpine:3.20
+  needs:
+    - tests
+  only:
+    - main
+    - logs-dashboard
+  variables:
+    DOCKER_SERVICE_NAME: "telegram_bot"
+  before_script:
+    - apk add --no-cache openssh rsync
+    - if [ -z "$DEPLOY_HOST" ]; then echo "DEPLOY_HOST is empty"; exit 1; fi
+    - if [ -z "$DEPLOY_USER" ]; then echo "DEPLOY_USER is empty"; exit 1; fi
+    - printf "%s\n" "$DEPLOY_SSH_PRIVATE_KEY" | tr -d "\r" > /tmp/ci_key
+    - chmod 600 /tmp/ci_key
+    - ssh-keygen -y -f /tmp/ci_key >/dev/null 2>&1 || { echo "ssh-keygen cannot read key"; exit 1; }
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" /bin/echo OK
+
+    # Детектируем docker compose (v2) или docker-compose (v1) на сервере
+    - |
+      COMPOSE_CMD_REMOTE=$(ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" '
+        if docker compose version >/dev/null 2>&1; then
+          echo "docker compose"
+        elif command -v docker-compose >/dev/null 2>&1; then
+          echo "docker-compose"
+        else
+          echo "none"
+        fi
+      ')
+      echo "Compose on server: $COMPOSE_CMD_REMOTE"
+      [ "$COMPOSE_CMD_REMOTE" != "none" ] || { echo "❌ Docker Compose не найден на сервере"; exit 1; }
+      echo "$COMPOSE_CMD_REMOTE" > /tmp/compose_cmd
+
+  script:
+    - set -e
+
+    # Синхронизация кода
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p $APP_DIR"
+    - rsync -avz --delete --progress -e "ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10" ./ "$DEPLOY_USER@$DEPLOY_HOST:$APP_DIR/"
+
+    # Обновление .env при наличии
+    - |
+      if [ -n "${ENV_FILE:-}" ]; then
+        printf "%s" "$ENV_FILE" > /tmp/ci_env
+      fi
+    - |
+      if [ -f /tmp/ci_env ]; then
+        ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+          "$DEPLOY_USER@$DEPLOY_HOST" "cat > $APP_DIR/.env" < /tmp/ci_env
+      else
+        echo "ENV_FILE not set, skip"
+      fi
+
+    # Читаем выбранную команду compose
+    - COMPOSE_CMD="$(cat /tmp/compose_cmd)"
+
+    # Контейнеры
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD down || true"
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD pull || true"
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD build --pull || true"
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD up -d"
+    - sleep 15
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD ps"
+
+    # Alembic в контейнере
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD exec -T $DOCKER_SERVICE_NAME which alembic"
+
+    # Пробуем upgrade; если падает (например, нет таблиц) — генерим миграцию и повторяем
+    - >
+      ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10
+      "$DEPLOY_USER@$DEPLOY_HOST"
+      "cd $APP_DIR && $COMPOSE_CMD exec -T $DOCKER_SERVICE_NAME sh -lc
+      'alembic upgrade head
+      || (rm -f migrations/versions/*.py || true;
+          alembic revision --autogenerate -m \"bootstrap \$(date +%F_%T)\";
+          alembic upgrade head)'"
+
+    # Хвост логов
+    - ssh -i /tmp/ci_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" "cd $APP_DIR && $COMPOSE_CMD logs --tail=10 $DOCKER_SERVICE_NAME"
